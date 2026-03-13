@@ -9,7 +9,7 @@ class DemoGithubApplicationTests {
 
 	@Test
 	void contextLoads() {
-		Assertions.assertEquals(20, 12+6, "Assertion volontairement fausse pour voir l'echec du workflow");
+		Assertions.assertEquals(20, 12+8, "Assertion volontairement fausse pour voir l'echec du workflow");
 	}
 
 }
