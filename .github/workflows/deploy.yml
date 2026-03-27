@@ -1,0 +1,128 @@
+# ================================================================
+# NOM DU WORKFLOW (EXO 4)
+# ================================================================
+name: Spring Boot CI + Docker + Deploy to EC2
+
+# ================================================================
+# DÉCLENCHEURS (Triggers)
+# ================================================================
+on:
+  push:
+    branches:
+      - main
+
+# ================================================================
+# JOBS : Chaque job s'exécute sur une machine virtuelle distincte
+# ================================================================
+jobs:
+
+  # =================================================================
+  # JOB 1 : TESTS
+  # Objectif : Vérifier que le code fonctionne avant de continuer
+  # =================================================================
+  test:
+    name: Exécuter les tests unitaires et d'intégration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Exécuter les tests
+        run: mvn clean verify --batch-mode --no-transfer-progress --errors
+
+
+  # =================================================================
+  # JOB 2 : BUILD & PUSH DOCKER
+  # Objectif : Compiler l'application et créer/pousser l'image Docker
+  # =================================================================
+  build-and-push:
+    name: Build JAR + Construire et pousser l'image Docker
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build JAR
+        run: mvn clean package -DskipTests --batch-mode --no-transfer-progress
+
+      # ==================== PARTIE DOCKER ====================
+
+      - name: Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Se connecter à Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          logout: true
+
+      - name: Construire et pousser l'image Docker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:${{ github.sha }}
+  
+  
+
+  # =================================================================
+  # JOB 3 : DÉPLOIEMENT SUR SERVEUR AWS EC2
+  # =================================================================
+  deploy:
+    name: Déploiement sur serveur EC2 via SSH
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Déployer l'application sur EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: 22
+
+          script: |
+            echo "=== Déploiement démarré sur $(hostname) ==="
+
+            docker stop spring-app || true
+            docker rm spring-app || true
+
+            IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest"
+
+            echo "Pulling latest image..."
+            docker pull $IMAGE_NAME
+
+            echo "Starting new container..."
+            docker run -d \
+              --name spring-app \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              --env SPRING_PROFILES_ACTIVE=prod \
+              $IMAGE_NAME
+
+            echo "Conteneur démarré avec succès"
+            echo "URL : http://$(curl -s ifconfig.me):8080"
+            echo "Logs du conteneur : docker logs spring-app --tail 50"
