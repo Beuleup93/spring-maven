@@ -55,6 +55,3 @@ ENV SPRING_PROFILES_ACTIVE=prod
 
 # Commande de démarrage avec options JVM
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
-
-
-
